@@ -767,18 +767,11 @@ export class Engine {
       if (nv <= 0) this.trapAnim.delete(k);
       else this.trapAnim.set(k, nv);
     }
-    // камера
+    // камера всегда центрируется на игроке
     const p = this.player;
-    const k = 1 - Math.exp(-8 * dt);
+    const k = 1 - Math.exp(-10 * dt);
     this.cam.x += (p.x - this.cam.x) * k;
     this.cam.y += (p.y - this.cam.y) * k;
-    const half = { x: this.viewW / 2 / this.scale, y: this.viewH / 2 / this.scale };
-    const mw = MAP_W * TILE;
-    const mh = MAP_H * TILE;
-    if (half.x * 2 < mw) this.cam.x = Math.max(half.x, Math.min(mw - half.x, this.cam.x));
-    else this.cam.x = mw / 2;
-    if (half.y * 2 < mh) this.cam.y = Math.max(half.y, Math.min(mh - half.y, this.cam.y));
-    else this.cam.y = mh / 2;
   }
 
   private updatePlayer(dt: number) {
@@ -1780,7 +1773,23 @@ export class Engine {
     ctx.scale(scale, scale);
 
     ctx.imageSmoothingEnabled = false;
+
+    // пустота вокруг карты (камера может выходить за её пределы)
+    const mw = MAP_W * TILE;
+    const mh = MAP_H * TILE;
+    ctx.fillStyle = "#04060a";
+    ctx.fillRect(this.cam.x - this.viewW / this.scale, this.cam.y - this.viewH / this.scale, (this.viewW * 2) / this.scale, (this.viewH * 2) / this.scale);
+
     ctx.drawImage(this.mapCanvas, 0, 0);
+
+    // рамка «острова» подземелья
+    ctx.strokeStyle = "rgba(46,58,79,0.85)";
+    ctx.lineWidth = 4;
+    ctx.strokeRect(-2, -2, mw + 4, mh + 4);
+    ctx.strokeStyle = "rgba(70,240,200,0.10)";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(-7, -7, mw + 14, mh + 14);
+    ctx.lineWidth = 1;
 
     this.drawTrapSpikes(ctx);
     this.drawStairsFx(ctx, time);

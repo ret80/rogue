@@ -169,7 +169,7 @@ function LevelUpModal({ points, onApply }: { points: number; onApply: (a: Alloc)
     { k: "int", name: "ИНТЕЛЛЕКТ", color: "#b98cff", hint: "+магия" },
   ];
   return (
-    <div className="absolute inset-0 bg-black/70 flex items-center justify-center p-4">
+    <div className="absolute inset-0 pointer-events-auto bg-black/70 flex items-center justify-center p-4">
       <div className="rs-panel rs-pop p-5 sm:p-6 w-full max-w-sm">
         <p className="font-pixel text-[9px] text-soul tracking-widest">ДУША ОКРЕПЛА</p>
         <h3 className="font-pixel text-xl text-gold mt-1">УРОВЕНЬ!</h3>
@@ -208,7 +208,7 @@ function MerchantModal({ hud, onBuy, onClose }: { hud: HudData; onBuy: (i: "poti
     { id: "heal", name: "ОБЕТ", desc: "полное исцеление", cost: hud.shop.healCost, color: "#e8434f" },
   ];
   return (
-    <div className="absolute inset-0 bg-black/70 flex items-center justify-center p-4">
+    <div className="absolute inset-0 pointer-events-auto bg-black/70 flex items-center justify-center p-4">
       <div className="rs-panel rs-pop p-5 sm:p-6 w-full max-w-md">
         <div className="flex items-start justify-between">
           <div>
@@ -243,7 +243,7 @@ function MerchantModal({ hud, onBuy, onClose }: { hud: HudData; onBuy: (i: "poti
 
 function PauseModal({ onResume, muted, onToggleMute, onQuit }: { onResume: () => void; muted: boolean; onToggleMute: () => void; onQuit: () => void }) {
   return (
-    <div className="absolute inset-0 bg-black/78 flex items-center justify-center p-4">
+    <div className="absolute inset-0 pointer-events-auto bg-black/75 flex items-center justify-center p-4">
       <div className="rs-panel rs-pop p-5 sm:p-7 w-full max-w-md">
         <div className="flex items-center gap-3">
           <IconSkull className="w-8 h-8 text-ember" />
