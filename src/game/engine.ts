@@ -15,10 +15,12 @@ import {
   itemDesc,
   makeGear,
   makeWeapon,
+  randomWeaponType,
   RARITY_COLORS,
   RARITY_NAMES,
   startingWeapon,
   type GameItem,
+  type Rarity,
   type Slot,
 } from "./items";
 import { classDef } from "./save";
@@ -860,19 +862,18 @@ export class Engine {
   }
 
   shopCosts() {
-    const p = this.player;
     return {
       potionCost: 30,
-      whetCost: 75 + 35 * p.weapon,
-      armorCost: 90 + 40 * p.armor,
+      weaponCost: 80 + this.floor * 12,
+      armorCost: 95 + this.floor * 12,
       healCost: 45,
     };
   }
 
-  buyItem(item: "potion" | "whet" | "armor" | "heal") {
+  buyItem(item: "potion" | "weapon" | "armor" | "heal") {
     const p = this.player;
     const c = this.shopCosts();
-    const cost = item === "potion" ? c.potionCost : item === "whet" ? c.whetCost : item === "armor" ? c.armorCost : c.healCost;
+    const cost = item === "potion" ? c.potionCost : item === "weapon" ? c.weaponCost : item === "armor" ? c.armorCost : c.healCost;
     if (p.gold < cost) {
       this.sfx.error();
       this.showHint("Недостаточно золота");
@@ -889,11 +890,26 @@ export class Engine {
     }
     p.gold -= cost;
     if (item === "potion") { p.potions++; this.addFloater(p.x, p.y - 16, "+1 ФЛЯГА", "#7ed957"); }
-    if (item === "whet") { p.weapon++; this.addFloater(p.x, p.y - 16, `ОРУЖИЕ +${p.weapon}`, "#ff9d3d"); }
-    if (item === "armor") { p.armor++; this.addFloater(p.x, p.y - 16, `БРОНЯ +${p.armor}`, "#7db4ff"); }
+    if (item === "weapon" || item === "armor") this.giveShopGear(item);
     if (item === "heal") { p.hp = p.maxHp; this.burst(p.x, p.y, "#7ed957", 16, 100); }
     this.sfx.buy();
     this.pushHud();
+  }
+
+  /* торговец продаёт настоящие предметы, не ниже «необычных» */
+  private giveShopGear(slot: "weapon" | "armor") {
+    const p = this.player;
+    const rarity = (Math.max(1, generateItem(this.floor + 2, this.rng).rarity)) as Rarity;
+    const it = slot === "weapon"
+      ? makeWeapon(randomWeaponType(this.rng), rarity, this.floor + 2)
+      : makeGear("armor", rarity, this.floor + 2, this.rng);
+    if (this.addToBag(it)) {
+      this.addFloater(p.x, p.y - 18, it.name, it.color, true);
+      this.showHint(`Куплено: ${it.name} [${RARITY_NAMES[it.rarity]}] — наденьте в сумке (I)`);
+    } else {
+      this.dropGround(p.x, p.y, "gear", it);
+      this.showHint("Сумка полна — предмет лёг у ног");
+    }
   }
 
   closeMerchant() {
@@ -929,8 +945,21 @@ export class Engine {
       str: p.str,
       dex: p.dex,
       int: p.int,
-      weapon: p.weapon,
-      armor: p.armor,
+      eStr: p.eStr,
+      eDex: p.eDex,
+      eInt: p.eInt,
+      keys: p.keys,
+      picks: p.picks,
+      bag: [...p.bag],
+      equipment: { ...p.equipment },
+      wpnPower: p.wpnPower,
+      wpnSpeed: p.wpnSpeed,
+      wpnRange: p.wpnRange,
+      wpnCrit: p.wpnCrit,
+      wpnRanged: p.wpnRanged,
+      critPct: Math.round(p.critChance * 100),
+      armorPts: p.armorPts,
+      speedPct: Math.round(p.speedMult * 100),
       poisonT: p.poisonT,
       pendingPoints: p.freePoints,
       modal:
@@ -980,6 +1009,7 @@ export class Engine {
     this.updatePlayer(dt);
     this.updateEnemies(dt);
     this.updateEnts(dt);
+    this.separateObjects();
     this.updateFx(dt);
 
     this.hudTimer -= dt;
@@ -1769,6 +1799,61 @@ export class Engine {
     }
     this.ents = this.ents.filter((e) => !e.dead);
     if (this.ents.length > 140) this.ents.splice(0, this.ents.length - 140);
+  }
+
+  /* ── расталкивание предметов: бочки, сундуки, лут и торговец не сливаются ── */
+  private separateObjects() {
+    const isMerchant = (e: Ent) => e.kind === "item" && (e as Ent & { merchant?: boolean }).merchant;
+    const solid = this.ents.filter(
+      (e) => !e.dead && (e.kind === "barrel" || e.kind === "chest" || e.kind === "item")
+    );
+    for (let i = 0; i < solid.length; i++) {
+      for (let j = i + 1; j < solid.length; j++) {
+        const a = solid[i];
+        const b = solid[j];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const d = Math.hypot(dx, dy);
+        const min = a.r + b.r - 2;
+        if (d >= min) continue;
+        if (d < 0.001) { b.x += 2; continue; }
+        const nx = dx / d;
+        const ny = dy / d;
+        const push = min - d;
+        const aDyn = a.kind === "barrel";
+        const bDyn = b.kind === "barrel";
+        if (aDyn && bDyn) {
+          a.x -= nx * push * 0.5; a.y -= ny * push * 0.5;
+          b.x += nx * push * 0.5; b.y += ny * push * 0.5;
+        } else if (aDyn) {
+          a.x -= nx * push; a.y -= ny * push;
+        } else if (bDyn) {
+          b.x += nx * push; b.y += ny * push;
+        } else {
+          a.x -= nx * push * 0.5; a.y -= ny * push * 0.5;
+          b.x += nx * push * 0.5; b.y += ny * push * 0.5;
+        }
+      }
+    }
+    // бочки не должны застревать в стенах после расталкивания
+    for (const e of solid) {
+      if (e.kind === "barrel") this.collideCircleWalls(e, 0.12);
+    }
+    // игрок не стоит внутри бочек, сундуков и торговца (лут остаётся подбираемым)
+    const p = this.player;
+    if (p.hp > 0) {
+      for (const e of solid) {
+        if (e.kind === "item" && !isMerchant(e)) continue;
+        const dx = p.x - e.x;
+        const dy = p.y - e.y;
+        const d = Math.hypot(dx, dy);
+        const min = p.r + e.r - 3;
+        if (d > 0.001 && d < min) {
+          p.x += (dx / d) * (min - d);
+          p.y += (dy / d) * (min - d);
+        }
+      }
+    }
   }
 
   private breakBarrel(e: Ent) {

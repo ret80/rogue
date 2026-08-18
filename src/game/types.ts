@@ -1,3 +1,5 @@
+import type { GameItem } from "./items";
+
 export type ClassId = "knight" | "thief" | "mage";
 export type TreeKey = "vitality" | "spirit" | "agility" | "wisdom" | "luck" | "will";
 
@@ -34,9 +36,16 @@ export interface RunSummary {
 
 export interface ShopInfo {
   potionCost: number;
-  whetCost: number;
+  weaponCost: number;
   armorCost: number;
   healCost: number;
+}
+
+export interface Equipment {
+  weapon: GameItem | null;
+  armor: GameItem | null;
+  ring: GameItem | null;
+  cloak: GameItem | null;
 }
 
 export interface HudData {
@@ -53,8 +62,21 @@ export interface HudData {
   str: number;
   dex: number;
   int: number;
-  weapon: number;
-  armor: number;
+  eStr: number;
+  eDex: number;
+  eInt: number;
+  keys: number;
+  picks: number;
+  bag: GameItem[];
+  equipment: Equipment;
+  wpnPower: number;
+  wpnSpeed: number;
+  wpnRange: number;
+  wpnCrit: number;
+  wpnRanged: boolean;
+  critPct: number;
+  armorPts: number;
+  speedPct: number;
   poisonT: number;
   pendingPoints: number;
   modal: "none" | "levelup" | "merchant" | "inventory";
