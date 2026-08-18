@@ -130,6 +130,7 @@ export class Engine {
   private ents: Ent[] = [];
   private particles: Particle[] = [];
   private floaters: Floater[] = [];
+  private rings: { x: number; y: number; t: number; max: number }[] = [];
 
   private player = {
     x: 0, y: 0, vx: 0, vy: 0, r: 11,
@@ -158,7 +159,7 @@ export class Engine {
   private hint: { text: string; id: number } | null = null;
   private hintId = 0;
 
-  modal: "none" | "levelup" | "merchant" | "pause" = "none";
+  modal: "none" | "levelup" | "merchant" | "pause" | "inventory" = "none";
   private over = false;
   private victory = false;
   private endTimer = -1;
@@ -168,8 +169,14 @@ export class Engine {
   private onResize = () => this.resize();
   private onKey = (e: KeyboardEvent) => {
     if (e.repeat) return;
+    if (e.key === "i" || e.key === "I" || e.key === "и" || e.key === "И") {
+      if (!this.over) this.toggleInventory();
+      return;
+    }
     if (e.key === "Escape" || e.key === "p" || e.key === "P" || e.key === "з" || e.key === "З") {
-      if (!this.over) this.togglePause();
+      if (this.over) return;
+      if (this.modal === "inventory") this.toggleInventory();
+      else this.togglePause();
     }
   };
 
@@ -267,6 +274,7 @@ export class Engine {
     this.ents = [];
     this.particles = [];
     this.floaters = [];
+    this.rings = [];
     this.path = [];
     this.pendingInteract = null;
     this.moveTarget = null;
@@ -521,14 +529,8 @@ export class Engine {
   }
 
   private spawnClickRing(x: number, y: number) {
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2;
-      this.addParticle({
-        x: x + Math.cos(a) * 10, y: y + Math.sin(a) * 10,
-        vx: Math.cos(a) * 18, vy: Math.sin(a) * 18,
-        life: 0.3, max: 0.3, size: 2, color: "#ffd166",
-      });
-    }
+    if (this.rings.length > 6) this.rings.shift();
+    this.rings.push({ x, y, t: 0, max: 0.38 });
   }
 
   private walkable(tx: number, ty: number) {
@@ -582,6 +584,19 @@ export class Engine {
       this.modal = "none";
     } else if (this.modal === "none") {
       this.modal = "pause";
+      this.sfx.click();
+    }
+    this.pushHud();
+  }
+
+  toggleInventory() {
+    if (this.over) return;
+    if (this.modal === "inventory") {
+      this.modal = "none";
+    } else if (this.modal === "none") {
+      this.modal = "inventory";
+      this.path = [];
+      this.moveTarget = null;
       this.sfx.click();
     }
     this.pushHud();
@@ -693,8 +708,15 @@ export class Engine {
       armor: p.armor,
       poisonT: p.poisonT,
       pendingPoints: p.freePoints,
-      modal: this.modal === "levelup" ? "levelup" : this.modal === "merchant" ? "merchant" : "none",
+      modal:
+        this.modal === "levelup" ? "levelup"
+        : this.modal === "merchant" ? "merchant"
+        : this.modal === "inventory" ? "inventory"
+        : "none",
       paused: this.modal === "pause",
+      kills: this.kills,
+      chests: this.chestsRun,
+      cls: this.setup.cls,
       shop: this.shopCosts(),
       boss: boss && boss.def
         ? { name: boss.def.name, hp: Math.max(0, Math.round(boss.hp)), maxHp: boss.maxHp }
@@ -767,6 +789,10 @@ export class Engine {
       const nv = v - dt * 2.2;
       if (nv <= 0) this.trapAnim.delete(k);
       else this.trapAnim.set(k, nv);
+    }
+    for (let i = this.rings.length - 1; i >= 0; i--) {
+      this.rings[i].t += dt;
+      if (this.rings[i].t >= this.rings[i].max) this.rings.splice(i, 1);
     }
     // камера жёстко центрируется на игроке — всегда, на любом пути обновления
     this.cam.x = this.player.x;
@@ -1792,6 +1818,23 @@ export class Engine {
     ctx.lineWidth = 1.5;
     ctx.strokeRect(-7, -7, mw + 14, mh + 14);
     ctx.lineWidth = 1;
+
+    // индикатор точки движения: серый круг, растущий из точки
+    for (const r of this.rings) {
+      const pr = Math.min(1, r.t / r.max);
+      const ease = 1 - Math.pow(1 - pr, 2.2);
+      const rad = 2 + 24 * ease;
+      ctx.strokeStyle = `rgba(163,172,186,${0.8 * (1 - pr)})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, rad, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = `rgba(163,172,186,${0.55 * (1 - pr)})`;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, Math.max(0.5, 2.5 * (1 - pr)), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.lineWidth = 1;
+    }
 
     this.drawTrapSpikes(ctx);
     this.drawStairsFx(ctx, time);

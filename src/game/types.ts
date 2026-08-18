@@ -57,8 +57,11 @@ export interface HudData {
   armor: number;
   poisonT: number;
   pendingPoints: number;
-  modal: "none" | "levelup" | "merchant";
+  modal: "none" | "levelup" | "merchant" | "inventory";
   paused: boolean;
+  kills: number;
+  chests: number;
+  cls: ClassId;
   shop: ShopInfo;
   boss: { name: string; hp: number; maxHp: number } | null;
   hint: { text: string; id: number } | null;
