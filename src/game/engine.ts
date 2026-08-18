@@ -259,7 +259,8 @@ export class Engine {
     this.canvas.height = Math.max(1, Math.round(h * this.dpr));
     this.canvas.style.width = w + "px";
     this.canvas.style.height = h + "px";
-    this.scale = Math.min(1.4, Math.max(0.72, Math.min(w / 860, h / 640)));
+    // ×1.5 — камера ближе к герою
+    this.scale = Math.min(1.4, Math.max(0.72, Math.min(w / 860, h / 640))) * 1.5;
   }
 
   /* ── floors ── */
@@ -1823,7 +1824,7 @@ export class Engine {
     for (const r of this.rings) {
       const pr = Math.min(1, r.t / r.max);
       const ease = 1 - Math.pow(1 - pr, 2.2);
-      const rad = 2 + 24 * ease;
+      const rad = 1 + 12 * ease;
       ctx.strokeStyle = `rgba(163,172,186,${0.8 * (1 - pr)})`;
       ctx.lineWidth = 2;
       ctx.beginPath();
