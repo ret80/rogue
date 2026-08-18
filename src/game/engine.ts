@@ -167,6 +167,7 @@ export class Engine {
   private resizeObs: ResizeObserver | null = null;
   private onResize = () => this.resize();
   private onKey = (e: KeyboardEvent) => {
+    if (e.repeat) return;
     if (e.key === "Escape" || e.key === "p" || e.key === "P" || e.key === "з" || e.key === "З") {
       if (!this.over) this.togglePause();
     }
@@ -767,11 +768,9 @@ export class Engine {
       if (nv <= 0) this.trapAnim.delete(k);
       else this.trapAnim.set(k, nv);
     }
-    // камера всегда центрируется на игроке
-    const p = this.player;
-    const k = 1 - Math.exp(-10 * dt);
-    this.cam.x += (p.x - this.cam.x) * k;
-    this.cam.y += (p.y - this.cam.y) * k;
+    // камера жёстко центрируется на игроке — всегда, на любом пути обновления
+    this.cam.x = this.player.x;
+    this.cam.y = this.player.y;
   }
 
   private updatePlayer(dt: number) {
@@ -846,6 +845,9 @@ export class Engine {
     }
 
     this.moveWithCollision(p, dt, false);
+
+    // туман войны пересчитывается при смене клетки (внутри — дешёвый early-return)
+    this.updateVisibility();
 
     // ловушки
     const ti = Math.floor(p.y / TILE) * MAP_W + Math.floor(p.x / TILE);

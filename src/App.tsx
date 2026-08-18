@@ -3,7 +3,7 @@ import { Sfx } from "./game/audio";
 import { Engine } from "./game/engine";
 import { TREE_DEFS, loadMeta, saveMeta } from "./game/save";
 import type { Alloc, ClassId, EngineEvent, HudData, MetaState, RunSummary, TreeKey } from "./game/types";
-import { Hud } from "./ui/hud";
+import { GameModals, Hud } from "./ui/hud";
 import { AllocateScreen, EndScreen, MenuScreen, SelectScreen, TreeScreen } from "./ui/screens";
 
 type Screen = "menu" | "select" | "allocate" | "game" | "tree" | "end";
@@ -232,13 +232,22 @@ function GameView({
         <canvas ref={canvasRef} className="absolute inset-0" />
       </div>
       {engine && hud && (
-        <Hud
-          engine={engine}
-          hud={hud}
-          muted={muted}
-          onToggleMute={onToggleMute}
-          onQuit={() => onQuit(hud.souls)}
-        />
+        <>
+          <Hud
+            engine={engine}
+            hud={hud}
+            muted={muted}
+            onToggleMute={onToggleMute}
+            onQuit={() => onQuit(hud.souls)}
+          />
+          <GameModals
+            engine={engine}
+            hud={hud}
+            muted={muted}
+            onToggleMute={onToggleMute}
+            onQuit={() => onQuit(hud.souls)}
+          />
+        </>
       )}
       {fatal && (
         <div className="absolute inset-0 z-50 bg-abyss/95 flex items-center justify-center p-4">
