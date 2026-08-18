@@ -1860,7 +1860,7 @@ export class Engine {
     for (const f of this.floaters) {
       const a = Math.max(0, Math.min(1, f.life / f.max * 1.4));
       ctx.globalAlpha = a;
-      ctx.font = f.big ? '700 15px "Pixelify Sans", "Press Start 2P", monospace' : '700 12px "Pixelify Sans", "Press Start 2P", monospace';
+      ctx.font = f.big ? '16px "Russo One", "Rubik", sans-serif' : '13px "Russo One", "Rubik", sans-serif';
       ctx.textAlign = "center";
       ctx.fillStyle = "#000";
       ctx.fillText(f.text, f.x + 1.5, f.y + 1.5);
@@ -2092,7 +2092,7 @@ export class Engine {
     ctx.beginPath();
     ctx.arc(e.x, e.y - 22 + bob + Math.sin(time * 5) * 1.5, 3, 0, Math.PI * 2);
     ctx.fill();
-    ctx.font = '700 11px "Pixelify Sans", "Press Start 2P", monospace';
+    ctx.font = '13px "Russo One", "Rubik", sans-serif';
     ctx.textAlign = "center";
     ctx.fillStyle = "#ffd166";
     ctx.fillText("ТОРГОВЕЦ", e.x, e.y - 28);

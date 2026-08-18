@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  --font-pixel: "Pixelify Sans", "Press Start 2P", monospace;
+  --font-pixel: "Russo One", "Rubik", sans-serif;
   --font-body: "Rubik", sans-serif;
 
   --color-abyss: #0a0d13;
@@ -37,6 +37,12 @@ body {
 canvas {
   display: block;
 }
+
+/* ── читаемость: минимальный кегль для всех мелких надписей ── */
+[class*="text-[8px]"] { font-size: 11px; line-height: 1.25; }
+[class*="text-[9px]"] { font-size: 11px; line-height: 1.25; }
+[class*="text-[10px]"] { font-size: 12px; line-height: 1.25; }
+[class*="text-[11px]"] { font-size: 12px; line-height: 1.3; }
 
 /* ── themed panel with notched corners ─────────────────────── */
 .rs-panel {
