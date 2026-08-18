@@ -156,20 +156,26 @@ function GameView({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const eng = new Engine(
+    // onHud вызывается синхронно ещё внутри конструктора,
+    // поэтому движок держим в замыкаемой переменной с проверкой
+    let eng: Engine | null = null;
+    const created = new Engine(
       canvas,
       { cls, alloc, meta },
       sfx,
       {
-        onHud: () => setHud(eng.getHud()),
+        onHud: () => {
+          if (eng) setHud(eng.getHud());
+        },
         onEvent: (e) => onEventRef.current(e),
       }
     );
-    engineRef.current = eng;
-    setHud(eng.getHud());
-    setEngine(eng);
+    eng = created;
+    engineRef.current = created;
+    setHud(created.getHud());
+    setEngine(created);
     return () => {
-      eng.destroy();
+      created.destroy();
       engineRef.current = null;
     };
     // создаётся один раз на забег (key={runId} пересоздаёт компонент)
