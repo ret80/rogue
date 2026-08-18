@@ -24,11 +24,20 @@ export default function App() {
   const sfx = sfxRef.current;
   sfx.muted = meta.muted;
 
-  // ловим любые неперехваченные ошибки, чтобы вместо чёрного экрана был диагноз
+  // ловим любые неперехваченные ошибки, чтобы вместо чёрного экрана был диагноз.
+  // Шум окружения (HMR/WebSocket дев-сервера, ResizeObserver) отфильтровываем.
   const [globalErr, setGlobalErr] = useState<string | null>(null);
   useEffect(() => {
-    const onErr = (e: ErrorEvent) => setGlobalErr(`${e.message}\n(${e.filename}:${e.lineno}:${e.colno})`);
-    const onRej = (e: PromiseRejectionEvent) => setGlobalErr(String(e.reason));
+    const NOISE = /websocket|resizeobserver|hot update|hmr|importmap|favicon/i;
+    const onErr = (e: ErrorEvent) => {
+      if (NOISE.test(e.message ?? "")) return;
+      setGlobalErr(`${e.message}\n(${e.filename}:${e.lineno}:${e.colno})`);
+    };
+    const onRej = (e: PromiseRejectionEvent) => {
+      const msg = String(e.reason instanceof Error ? `${e.reason.name}: ${e.reason.message}` : e.reason);
+      if (NOISE.test(msg)) return;
+      setGlobalErr(msg);
+    };
     window.addEventListener("error", onErr);
     window.addEventListener("unhandledrejection", onRej);
     return () => {
