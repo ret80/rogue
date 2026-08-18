@@ -10,6 +10,17 @@ import {
   T_WALL,
   type DungeonData,
 } from "./dungeon";
+import {
+  generateItem,
+  itemDesc,
+  makeGear,
+  makeWeapon,
+  RARITY_COLORS,
+  RARITY_NAMES,
+  startingWeapon,
+  type GameItem,
+  type Slot,
+} from "./items";
 import { classDef } from "./save";
 import {
   FINAL_FLOOR,
@@ -75,7 +86,9 @@ interface Ent {
   facing?: number; summonCd?: number; teleCd?: number;
   flash?: number; dead?: boolean;
   opened?: boolean;
-  itemType?: "potion" | "gold";
+  locked?: boolean; // запертый сундук
+  itemType?: "potion" | "gold" | "gear" | "key" | "pick";
+  payload?: GameItem; // предмет для itemType "gear"
   from?: "player" | "enemy"; dmg?: number; ttl?: number; magic?: boolean;
   ttlMax?: number;
 }
@@ -131,15 +144,29 @@ export class Engine {
   private particles: Particle[] = [];
   private floaters: Floater[] = [];
   private rings: { x: number; y: number; t: number; max: number }[] = [];
+  // двери: индекс клетки, заперта ли, открыта ли
+  private doors: { idx: number; locked: boolean; opened: boolean }[] = [];
+  private blocked = new Set<number>();
+  private lastDoorHint = 0;
 
   private player = {
     x: 0, y: 0, vx: 0, vy: 0, r: 11,
     hp: 100, maxHp: 100, xp: 0, level: 1,
     str: 10, dex: 10, int: 10, freePoints: 0,
     weapon: 0, armor: 0, gold: 0, souls: 0, potions: 1,
+    keys: 0, picks: 1,
     poisonT: 0, poisonDps: 0,
     atkCd: 0, swingT: 0, facing: 0, moving: false,
     stepPhase: 0, invulnT: 0,
+    // экипировка и сумка
+    equipment: { weapon: null, armor: null, ring: null, cloak: null } as {
+      weapon: GameItem | null; armor: GameItem | null; ring: GameItem | null; cloak: GameItem | null;
+    },
+    bag: [] as GameItem[],
+    // производные (пересчитываются в recalc)
+    eStr: 10, eDex: 10, eInt: 10,
+    wpnPower: 0, wpnSpeed: 1, wpnRange: 1.3, wpnCrit: 0, wpnRanged: false, wpnArmor: 0,
+    armorPts: 0, critChance: 0.05, speedMult: 1,
   };
   private path: number[] = [];
   private moveTarget: { x: number; y: number } | null = null;
@@ -196,6 +223,10 @@ export class Engine {
     p.maxHp = Math.round((c.hp + t.vitality * 6) * 1);
     p.hp = p.maxHp;
     if (setup.cls === "knight") p.armor = 1;
+    p.equipment.weapon = startingWeapon(setup.cls);
+    p.keys = 0;
+    p.picks = 1;
+    this.recalc();
 
     this.resize();
     window.addEventListener("resize", this.onResize);
@@ -263,6 +294,100 @@ export class Engine {
     this.scale = Math.min(1.4, Math.max(0.72, Math.min(w / 860, h / 640))) * 1.5;
   }
 
+  /* пересчёт производных статов с учётом экипировки и древа */
+  private recalc() {
+    const p = this.player;
+    const eq = p.equipment;
+    const tree = this.setup.meta.tree;
+    const sum = (f: (it: GameItem) => number) =>
+      (eq.weapon ? f(eq.weapon) : 0) + (eq.armor ? f(eq.armor) : 0) + (eq.ring ? f(eq.ring) : 0) + (eq.cloak ? f(eq.cloak) : 0);
+
+    p.eStr = p.str + sum((i) => i.stat.str);
+    p.eDex = p.dex + sum((i) => i.stat.dex);
+    p.eInt = p.int + sum((i) => i.stat.int);
+
+    const w = eq.weapon;
+    if (w) {
+      p.wpnPower = w.power;
+      p.wpnSpeed = w.speed;
+      p.wpnRange = w.range;
+      p.wpnCrit = w.crit;
+      p.wpnRanged = w.ranged;
+      p.wpnArmor = w.armor;
+    } else {
+      p.wpnPower = 0;
+      p.wpnSpeed = 1;
+      p.wpnRange = 1.2;
+      p.wpnCrit = 0;
+      p.wpnRanged = false;
+      p.wpnArmor = 0;
+    }
+
+    p.armorPts =
+      p.armor * 6 +
+      (this.setup.cls === "knight" ? 8 : 0) +
+      p.wpnArmor +
+      (eq.armor ? eq.armor.armor : 0) +
+      sum((i) => (i.slot === "cloak" ? Math.round(i.power / 4) : 0));
+
+    p.critChance = Math.min(0.6, 0.05 + p.eDex / 100 + (p.wpnCrit + sum((i) => i.stat.crit)) / 100 + 0.02 * tree.luck);
+    p.speedMult = 1 + 0.03 * tree.will + sum((i) => i.stat.speed);
+  }
+
+  equipItem(uid: number) {
+    const p = this.player;
+    const idx = p.bag.findIndex((i) => i.uid === uid);
+    if (idx < 0) return;
+    const item = p.bag[idx];
+    const slot = item.slot;
+    const prev = p.equipment[slot];
+    p.bag.splice(idx, 1);
+    if (prev) p.bag.push(prev);
+    p.equipment[slot] = item;
+    this.recalc();
+    this.sfx.buy();
+    this.pushHud();
+  }
+
+  unequipItem(slot: Slot) {
+    const p = this.player;
+    const cur = p.equipment[slot];
+    if (!cur) return;
+    if (p.bag.length >= 24) {
+      this.showHint("Сумка полна");
+      this.sfx.error();
+      return;
+    }
+    p.equipment[slot] = null;
+    p.bag.push(cur);
+    this.recalc();
+    this.sfx.click();
+    this.pushHud();
+  }
+
+  dropItem(uid: number) {
+    const p = this.player;
+    const idx = p.bag.findIndex((i) => i.uid === uid);
+    if (idx < 0) return;
+    p.bag.splice(idx, 1);
+    this.sfx.click();
+    this.pushHud();
+  }
+
+  private addToBag(item: GameItem): boolean {
+    const p = this.player;
+    if (p.bag.length >= 24) return false;
+    p.bag.push(item);
+    return true;
+  }
+
+  /* положить предмет на пол как сущность */
+  private dropGround(x: number, y: number, type: "gear" | "key" | "pick", payload?: GameItem) {
+    this.ents.push(this.makeEnt("item", x + (this.rng() - 0.5) * 12, y + (this.rng() - 0.5) * 12, {
+      r: 8, itemType: type, payload,
+    }));
+  }
+
   /* ── floors ── */
 
   private startFloor(floor: number, first = false) {
@@ -279,6 +404,8 @@ export class Engine {
     this.path = [];
     this.pendingInteract = null;
     this.moveTarget = null;
+    this.doors = [];
+    this.blocked = new Set();
 
     const p = this.player;
     p.x = (tileX(this.dungeon.spawnIdx) + 0.5) * TILE;
@@ -398,6 +525,98 @@ export class Engine {
       (e as Ent & { merchant?: boolean }).merchant = true;
       this.ents.push(e);
     }
+
+    this.spawnDoors(stairsRoom);
+  }
+
+  /* двери: перекрывают вход в комнату с лестницей (и торговцем) */
+  private spawnDoors(stairsRoom: { x: number; y: number; w: number; h: number }) {
+    const targets: { x: number; y: number; w: number; h: number }[] = [stairsRoom];
+    if (this.dungeon.merchantIdx !== null) {
+      const mroom = this.dungeon.rooms.find(
+        (r) => Math.floor(r.cx) === tileX(this.dungeon.merchantIdx!) && Math.floor(r.cy) === tileY(this.dungeon.merchantIdx!)
+      );
+      if (mroom) targets.push(mroom);
+    }
+
+    for (const room of targets) {
+      const spot = this.findDoorSpot(room);
+      if (spot === null) continue;
+      // не ставим две двери на одну клетку
+      if (this.doors.some((d) => d.idx === spot)) continue;
+      this.doors.push({ idx: spot, locked: true, opened: false });
+      this.blocked.add(spot);
+    }
+
+    // на верхних этажах — дополнительная случайная дверь с ключом рядом
+    if (this.floor >= 2 && this.rng() < 0.7) {
+      const room = this.dungeon.rooms[1 + Math.floor(this.rng() * (this.dungeon.rooms.length - 1))];
+      const spot = this.findDoorSpot(room);
+      if (spot !== null && !this.doors.some((d) => d.idx === spot) && !this.blocked.has(spot)) {
+        this.doors.push({ idx: spot, locked: true, opened: false });
+        this.blocked.add(spot);
+        // ключ поблизости, чтобы было чем открыть
+        const kx = (tileX(spot) + 0.5) * TILE;
+        const ky = (tileY(spot) + 0.5) * TILE;
+        this.dropGround(kx + TILE * 1.5, ky + TILE * 1.5, "key");
+      }
+    }
+  }
+
+  /* ищет клетку-«горловину» на границе комнаты (пол, ведущий наружу) */
+  private findDoorSpot(room: { x: number; y: number; w: number; h: number }): number | null {
+    const tiles = this.dungeon.tiles;
+    const isFloorish = (x: number, y: number) => {
+      if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) return false;
+      const t = tiles[y * MAP_W + x];
+      return t === T_FLOOR || t === T_TRAP || t === T_STAIRS;
+    };
+    const outside = (x: number, y: number) => x < room.x || y < room.y || x >= room.x + room.w || y >= room.y + room.h;
+
+    const candidates: number[] = [];
+    for (let x = room.x; x < room.x + room.w; x++) {
+      // верхняя и нижняя кромка
+      for (const y of [room.y, room.y + room.h - 1]) {
+        if (isFloorish(x, y) && ((isFloorish(x, y - 1) && outside(x, y - 1)) || (isFloorish(x, y + 1) && outside(x, y + 1))))
+          candidates.push(y * MAP_W + x);
+      }
+    }
+    for (let y = room.y; y < room.y + room.h; y++) {
+      for (const x of [room.x, room.x + room.w - 1]) {
+        if (isFloorish(x, y) && ((isFloorish(x - 1, y) && outside(x - 1, y)) || (isFloorish(x + 1, y) && outside(x + 1, y))))
+          candidates.push(y * MAP_W + x);
+      }
+    }
+    if (!candidates.length) return null;
+    return candidates[Math.floor(this.rng() * candidates.length)];
+  }
+
+  /* клик по двери рядом с игроком */
+  private tryDoorAt(wx: number, wy: number): boolean {
+    const p = this.player;
+    for (const d of this.doors) {
+      if (d.opened) continue;
+      const dx = (tileX(d.idx) + 0.5) * TILE;
+      const dy = (tileY(d.idx) + 0.5) * TILE;
+      if (Math.hypot(dx - wx, dy - wy) < TILE * 0.9) {
+        const near = Math.hypot(dx - p.x, dy - p.y) < TILE * 1.8;
+        if (!near) {
+          // просто идём к двери
+          this.setDestination(dx, dy, false);
+          return true;
+        }
+        if (this.tryUnlock()) {
+          d.opened = true;
+          d.locked = false;
+          this.blocked.delete(d.idx);
+          this.burst(dx, dy, "#c98a4b", 14, 110);
+          this.sfx.barrel();
+          this.showHint("Дверь открыта");
+        }
+        return true;
+      }
+    }
+    return false;
   }
 
   private countKind(kind: EntKind) {
@@ -472,6 +691,8 @@ export class Engine {
     const p = this.player;
 
     if (!drag) {
+      // двери
+      if (this.tryDoorAt(w.x, w.y)) return;
       // интерактивные объекты под кликом
       for (const ent of this.ents) {
         if (ent.dead || ent.kind === "proj" || ent.kind === "corpse") continue;
@@ -483,7 +704,7 @@ export class Engine {
           const dp = Math.hypot(ent.x - p.x, ent.y - p.y);
           if (dp < TILE * 1.7) {
             if (merchant) this.openMerchant();
-            else this.openChest(ent);
+            else this.tryOpenChest(ent);
             return;
           }
           this.pendingInteract = ent;
@@ -536,7 +757,9 @@ export class Engine {
 
   private walkable(tx: number, ty: number) {
     if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return false;
-    const t = this.dungeon.tiles[ty * MAP_W + tx];
+    const i = ty * MAP_W + tx;
+    if (this.blocked.has(i)) return false;
+    const t = this.dungeon.tiles[i];
     return t === T_FLOOR || t === T_STAIRS || t === T_TRAP;
   }
 
@@ -627,6 +850,7 @@ export class Engine {
     }
     p.str += a.str; p.dex += a.dex; p.int += a.int;
     p.freePoints -= sum;
+    this.recalc();
     this.sfx.click();
     if (p.freePoints <= 0) {
       this.modal = "none";
@@ -818,7 +1042,7 @@ export class Engine {
     p.swingT = Math.max(0, p.swingT - dt);
 
     // движение по пути
-    let speed = 3.1 * TILE * (1 + 0.03 * tree.will);
+    let speed = 3.1 * TILE * p.speedMult;
     if (c.id === "thief") speed *= 1.12;
     p.moving = false;
 
@@ -860,7 +1084,7 @@ export class Engine {
       if (d < TILE * 1.7 && !ent.dead) {
         const merchant = (ent as Ent & { merchant?: boolean }).merchant;
         if (merchant) this.openMerchant();
-        else if (ent.kind === "chest" && !ent.opened) this.openChest(ent);
+        else if (ent.kind === "chest" && !ent.opened) this.tryOpenChest(ent);
       }
       this.pendingInteract = null;
       this.moveTarget = null;
@@ -939,6 +1163,25 @@ export class Engine {
             this.sfx.potion();
             e.dead = true;
           }
+        } else if (e.itemType === "key") {
+          p.keys++;
+          this.addFloater(e.x, e.y - 12, "+1 КЛЮЧ", "#ffd166");
+          this.sfx.coin();
+          this.burst(e.x, e.y, "#ffd166", 8, 70);
+          e.dead = true;
+        } else if (e.itemType === "pick") {
+          p.picks++;
+          this.addFloater(e.x, e.y - 12, "+1 ОТМЫЧКА", "#9aa3b2");
+          this.sfx.coin();
+          e.dead = true;
+        } else if (e.itemType === "gear" && e.payload) {
+          if (this.addToBag(e.payload)) {
+            this.addFloater(e.x, e.y - 14, `${e.payload.name}`, e.payload.color, true);
+            this.showHint(`В сумке: ${e.payload.name} [${RARITY_NAMES[e.payload.rarity]}]`);
+            this.sfx.chest();
+            this.burst(e.x, e.y, e.payload.color, 10, 90);
+            e.dead = true;
+          }
         }
       }
     }
@@ -947,7 +1190,7 @@ export class Engine {
   private stairsWarned = false;
 
   private mitigate(raw: number) {
-    const armor = this.player.armor * 6 + (this.setup.cls === "knight" ? 8 : 0);
+    const armor = this.player.armorPts;
     return Math.max(1, Math.round(raw * (1 - armor / (armor + 60))));
   }
 
@@ -955,7 +1198,9 @@ export class Engine {
     const p = this.player;
     if (p.atkCd > 0) return;
     const c = classDef(this.setup.cls);
-    const range = c.range * TILE;
+    const isRanged = c.ranged || p.wpnRanged;
+    const rangeCells = isRanged ? Math.max(c.ranged ? c.range : 0, p.wpnRange) : Math.max(c.range, p.wpnRange);
+    const range = rangeCells * TILE;
     let best: Ent | null = null;
     let bestD = Infinity;
     for (const e of this.ents) {
@@ -978,16 +1223,18 @@ export class Engine {
     p.facing = best ? Math.atan2(best.y - p.y, best.x - p.x) : Math.atan2(barrel!.y - p.y, barrel!.x - p.x);
 
     const willSpd = 1 - 0.03 * this.setup.meta.tree.will;
-    p.atkCd = Math.max(0.3, c.atkCd * willSpd);
+    p.atkCd = Math.max(0.25, c.atkCd * p.wpnSpeed * willSpd);
     p.swingT = 0.18;
 
-    if (c.ranged) {
-      const dmg = Math.max(2, Math.round(p.int * (1 + 0.25 * p.weapon) * (0.9 + this.rng() * 0.2)));
+    if (isRanged) {
+      const magic = c.ranged;
+      const base = magic ? p.eInt * 0.6 + p.wpnPower : p.eDex * 0.5 + p.wpnPower;
+      const dmg = Math.max(2, Math.round(base * (0.9 + this.rng() * 0.2)));
       const t = best ?? barrel!;
       const a = Math.atan2(t.y - p.y, t.x - p.x);
       this.ents.push(this.makeEnt("proj", p.x + Math.cos(a) * 14, p.y + Math.sin(a) * 14, {
         r: 5, vx: Math.cos(a) * 330, vy: Math.sin(a) * 330,
-        from: "player", dmg, ttl: 1.6, ttlMax: 1.6, magic: true,
+        from: "player", dmg, ttl: 1.6, ttlMax: 1.6, magic,
       }));
       this.sfx.bolt();
       return;
@@ -1010,8 +1257,8 @@ export class Engine {
 
       if (e.kind === "barrel") {
         e.hp -= 6;
-        e.vx += Math.cos(ang) * 300;
-        e.vy += Math.sin(ang) * 300;
+        e.vx += Math.cos(ang) * 120;
+        e.vy += Math.sin(ang) * 120;
         this.sfx.barrel();
         this.burst(e.x, e.y, "#c98a4b", 8, 110);
         if (e.hp <= 0) this.breakBarrel(e);
@@ -1019,10 +1266,9 @@ export class Engine {
       }
 
       hitAny = true;
-      let dmg = Math.max(1, Math.round(p.str * (1 + 0.25 * p.weapon) * (0.9 + this.rng() * 0.2)));
-      const critChance = Math.min(0.5, 0.05 + p.dex / 100 + 0.02 * this.setup.meta.tree.luck);
-      let crit = this.rng() < critChance;
-      if (crit) dmg = Math.round(dmg * (1.5 + p.dex / 50));
+      let dmg = Math.max(1, Math.round((p.eStr + p.wpnPower) * (0.9 + this.rng() * 0.2)));
+      let crit = this.rng() < p.critChance;
+      if (crit) dmg = Math.round(dmg * (1.5 + p.eDex / 50));
 
       // щит скелета
       if (e.def?.shieldFront && e.facing !== undefined) {
@@ -1103,6 +1349,22 @@ export class Engine {
     if (this.rng() < 0.45) {
       const g = this.makeEnt("item", e.x + (this.rng() - 0.5) * 10, e.y + (this.rng() - 0.5) * 10, { r: 8, itemType: "gold" });
       this.ents.push(g);
+    }
+
+    // снаряжение
+    const luck = 0.08 * this.setup.meta.tree.luck;
+    if (def.boss) {
+      // босс роняет 2 предмета повышенной редкости
+      for (let i = 0; i < 2; i++) {
+        const it = generateItem(this.floor + 3, this.rng);
+        if (it.rarity < 2) it.rarity = 2;
+        this.dropGround(e.x, e.y, "gear", it);
+      }
+      this.dropGround(e.x, e.y, "key");
+    } else if (this.rng() < 0.14 + luck) {
+      this.dropGround(e.x, e.y, "gear", generateItem(this.floor, this.rng));
+    } else if (this.rng() < 0.05) {
+      this.dropGround(e.x, e.y, this.rng() < 0.5 ? "key" : "pick");
     }
 
     // кровь
@@ -1432,9 +1694,9 @@ export class Engine {
         case "barrel": {
           e.x += e.vx * dt;
           e.y += e.vy * dt;
-          e.vx *= Math.exp(-4.5 * dt);
-          e.vy *= Math.exp(-4.5 * dt);
-          this.collideCircleWalls(e, 0.45);
+          e.vx *= Math.exp(-7 * dt);
+          e.vy *= Math.exp(-7 * dt);
+          this.collideCircleWalls(e, 0.12);
           const speed = Math.hypot(e.vx, e.vy);
           if (speed > 70) {
             for (const o of this.ents) {
@@ -1476,8 +1738,8 @@ export class Engine {
                 if (o.kind === "barrel") {
                   o.hp -= 6;
                   const a = Math.atan2(e.vy, e.vx);
-                  o.vx += Math.cos(a) * 260;
-                  o.vy += Math.sin(a) * 260;
+                  o.vx += Math.cos(a) * 100;
+                  o.vy += Math.sin(a) * 100;
                   if (o.hp <= 0) this.breakBarrel(o);
                 } else {
                   const crit = this.rng() < Math.min(0.5, 0.05 + p.dex / 100);
@@ -1531,30 +1793,78 @@ export class Engine {
     }
   }
 
+  /* попытка открыть сундук с учётом замка */
+  private tryOpenChest(e: Ent) {
+    if (e.opened) return;
+    if (e.locked) {
+      if (!this.tryUnlock()) return;
+      e.locked = false;
+    }
+    this.openChest(e);
+  }
+
+  /* ключ или отмычка; успех отмычки зависит от ловкости */
+  private tryUnlock(): boolean {
+    const p = this.player;
+    if (p.keys > 0) {
+      p.keys--;
+      this.sfx.buy();
+      this.addFloater(p.x, p.y - 20, "ОТКРЫТО КЛЮЧОМ", "#ffd166");
+      this.pushHud();
+      return true;
+    }
+    if (p.picks > 0) {
+      p.picks--;
+      const chance = Math.min(0.95, 0.35 + p.eDex * 0.02 + 0.01 * this.setup.meta.tree.agility);
+      if (this.rng() < chance) {
+        this.sfx.buy();
+        this.addFloater(p.x, p.y - 20, "ЗАМОК ВЗЛОМАН", "#46f0c8");
+        this.pushHud();
+        return true;
+      }
+      this.sfx.error();
+      this.addFloater(p.x, p.y - 20, "ОТМЫЧКА СЛОМАНА", "#e8434f");
+      this.pushHud();
+      return false;
+    }
+    this.showHint("Заперто — нужен ключ или отмычка");
+    this.sfx.error();
+    return false;
+  }
+
   private openChest(e: Ent) {
     if (e.opened) return;
     e.opened = true;
     this.chestsRun++;
     this.sfx.chest();
     this.burst(e.x, e.y, "#ffd166", 18, 130);
-    const roll = this.rng();
     const p = this.player;
-    if (roll < 0.42) {
-      const gold = Math.round((20 + this.rng() * 40) * (1 + 0.08 * this.setup.meta.tree.luck));
-      p.gold += gold;
-      this.addFloater(e.x, e.y - 16, `+${gold} ЗОЛОТА`, "#ffd166", true);
-    } else if (roll < 0.65) {
-      p.potions = Math.min(6, p.potions + 1);
-      this.addFloater(e.x, e.y - 16, "+1 ФЛЯГА", "#7ed957", true);
-    } else if (roll < 0.85) {
-      p.weapon++;
-      this.addFloater(e.x, e.y - 16, `КЛИНОК +${p.weapon}`, "#ff9d3d", true);
-      this.flashTeal = 0.35;
+    const lockedBonus = e.locked ? 2 : 0;
+
+    // гарантированный предмет
+    const item = generateItem(this.floor + lockedBonus, this.rng);
+    if (this.addToBag(item)) {
+      this.addFloater(e.x, e.y - 18, item.name, item.color, true);
+      this.showHint(`Получено: ${item.name} [${RARITY_NAMES[item.rarity]}]`);
     } else {
-      p.armor++;
-      this.addFloater(e.x, e.y - 16, `ЛАТЫ +${p.armor}`, "#7db4ff", true);
-      this.flashTeal = 0.35;
+      this.dropGround(e.x, e.y, "gear", item);
     }
+
+    // золото почти всегда
+    const gold = Math.round((15 + this.rng() * 35) * (1 + 0.08 * this.setup.meta.tree.luck));
+    p.gold += gold;
+    this.addFloater(e.x, e.y - 4, `+${gold}`, "#ffd166");
+
+    // дополнительные шансы
+    if (this.rng() < 0.4) p.potions = Math.min(6, p.potions + 1);
+    if (e.locked) {
+      // запертые сундуки щедрее
+      if (this.rng() < 0.6) this.dropGround(e.x, e.y, "gear", generateItem(this.floor + lockedBonus, this.rng));
+      if (this.rng() < 0.4) this.dropGround(e.x, e.y, "key");
+    } else if (this.rng() < 0.15) {
+      this.dropGround(e.x, e.y, this.rng() < 0.5 ? "key" : "pick");
+    }
+    this.flashTeal = 0.3;
     this.pushHud();
   }
 
@@ -1718,24 +2028,38 @@ export class Engine {
           const nearFloor =
             (tx > 0 && tiles[i - 1] !== T_WALL) || (tx < MAP_W - 1 && tiles[i + 1] !== T_WALL) ||
             (ty > 0 && tiles[i - MAP_W] !== T_WALL) || (ty < MAP_H - 1 && tiles[i + MAP_W] !== T_WALL);
-          g.fillStyle = nearFloor ? "#1b2330" : "#10151f";
+          g.fillStyle = nearFloor ? "#2a3242" : "#1a2130";
           g.fillRect(x, y, TILE, TILE);
           if (nearFloor) {
+            // Кладка: вертикальные швы, чтобы стена читалась как камень
+            g.strokeStyle = "rgba(10,13,19,0.55)";
+            g.lineWidth = 1;
+            g.beginPath();
+            g.moveTo(x + TILE / 2, y);
+            g.lineTo(x + TILE / 2, y + TILE);
+            g.stroke();
             if (ty < MAP_H - 1 && tiles[i + MAP_W] !== T_WALL) {
-              g.fillStyle = "#39424f";
-              g.fillRect(x, y + TILE - 5, TILE, 5);
-              g.fillStyle = "#242e3d";
-              g.fillRect(x, y + TILE - 8, TILE, 3);
+              // Яркая освещённая кромка, нависающая над полом
+              g.fillStyle = "#5b6880";
+              g.fillRect(x, y + TILE - 6, TILE, 6);
+              g.fillStyle = "#3d4a61";
+              g.fillRect(x, y + TILE - 10, TILE, 4);
+              g.fillStyle = "rgba(255,255,255,0.08)";
+              g.fillRect(x, y + TILE - 6, TILE, 1.5);
+            } else if (ty > 0 && tiles[i - MAP_W] !== T_WALL) {
+              g.fillStyle = "#46526a";
+              g.fillRect(x, y, TILE, 5);
             }
             if (rng() < 0.3) {
-              g.fillStyle = "rgba(255,255,255,0.03)";
+              g.fillStyle = "rgba(255,255,255,0.05)";
               g.fillRect(x + rng() * 20, y + rng() * 20, 6, 3);
             }
           }
         } else {
-          const shade = 0.9 + rng() * 0.2;
-          const base = t === T_STAIRS ? 30 : 35;
-          g.fillStyle = `rgb(${Math.round(base * shade)},${Math.round((base + 8) * shade)},${Math.round((base + 19) * shade)})`;
+          const shade = 0.88 + rng() * 0.24;
+          const base = t === T_STAIRS ? 44 : 52;
+          // Тёплый серо-коричневый пол, контрастный холодным синим стенам
+          g.fillStyle = `rgb(${Math.round((base + 6) * shade)},${Math.round((base + 2) * shade)},${Math.round((base - 8) * shade)})`;
           g.fillRect(x, y, TILE, TILE);
           g.strokeStyle = "rgba(0,0,0,0.16)";
           g.strokeRect(x + 0.5, y + 0.5, TILE - 1, TILE - 1);
@@ -1839,6 +2163,7 @@ export class Engine {
 
     this.drawTrapSpikes(ctx);
     this.drawStairsFx(ctx, time);
+    this.drawDoors(ctx, time);
 
     // сортировка по y
     const drawList: { y: number; e: Ent | null }[] = this.ents
@@ -1976,6 +2301,69 @@ export class Engine {
     }
   }
 
+  private drawDoors(ctx: CanvasRenderingContext2D, time: number) {
+    for (const d of this.doors) {
+      if (d.opened) continue;
+      const x = tileX(d.idx) * TILE;
+      const y = tileY(d.idx) * TILE;
+      // Determine whether it's a horizontal or vertical door based on the surrounding walls
+      const leftWall = !this.walkableRaw(tileX(d.idx) - 1, tileY(d.idx));
+      const rightWall = !this.walkableRaw(tileX(d.idx) + 1, tileY(d.idx));
+      const vertical = leftWall && rightWall;
+
+      ctx.save();
+      ctx.translate(x + TILE / 2, y + TILE / 2);
+      if (!vertical) ctx.rotate(Math.PI / 2);
+
+      // Door frame
+      ctx.fillStyle = "#3a2a17";
+      ctx.fillRect(-TILE / 2 + 2, -TILE / 2 + 2, TILE - 4, TILE - 4);
+      // Door panels
+      ctx.fillStyle = d.locked ? "#7a4a24" : "#8a5a2e";
+      ctx.fillRect(-TILE / 2 + 5, -TILE / 2 + 5, TILE - 10, TILE - 10);
+      // Planks
+      ctx.strokeStyle = "#5b3a1e";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-TILE / 2 + 5, -TILE / 6);
+      ctx.lineTo(TILE / 2 - 5, -TILE / 6);
+      ctx.moveTo(-TILE / 2 + 5, TILE / 6);
+      ctx.lineTo(TILE / 2 - 5, TILE / 6);
+      ctx.stroke();
+      // Handle / lock
+      if (d.locked) {
+        const pulse = 0.5 + 0.5 * Math.sin(time * 4);
+        ctx.fillStyle = `rgba(255,209,102,${0.5 + pulse * 0.4})`;
+        ctx.beginPath();
+        ctx.arc(0, 0, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#ffd166";
+        ctx.strokeRect(-2.5, -2.5, 5, 5);
+      } else {
+        ctx.fillStyle = "#9aa3b2";
+        ctx.beginPath();
+        ctx.arc(0, TILE / 5, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+      ctx.lineWidth = 1;
+    }
+  }
+
+  private hexGlow(hex: string): string {
+    const h = hex.replace("#", "");
+    const r = parseInt(h.substring(0, 2), 16);
+    const g = parseInt(h.substring(2, 4), 16);
+    const b = parseInt(h.substring(4, 6), 16);
+    return `${r},${g},${b}`;
+  }
+
+  private walkableRaw(tx: number, ty: number) {
+    if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return false;
+    const t = this.dungeon.tiles[ty * MAP_W + tx];
+    return t === T_FLOOR || t === T_STAIRS || t === T_TRAP;
+  }
+
   private drawStairsFx(ctx: CanvasRenderingContext2D, time: number) {
     const i = this.dungeon.stairsIdx;
     const x = tileX(i) * TILE + TILE / 2;
@@ -2042,22 +2430,69 @@ export class Engine {
         break;
       }
       case "chest": {
-        ctx.fillStyle = "rgba(0,0,0,0.35)";
+        const gl = 0.4 + 0.4 * Math.sin(time * 4 + e.seed);
+        ctx.fillStyle = "rgba(0,0,0,0.4)";
         ctx.beginPath();
-        ctx.ellipse(e.x, e.y + 10, 12, 4, 0, 0, Math.PI * 2);
+        ctx.ellipse(e.x, e.y + 11, 13, 4.5, 0, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = e.opened ? "#5a4326" : "#8a5a2e";
-        ctx.fillRect(e.x - 11, e.y - 8, 22, 16);
-        ctx.fillStyle = e.opened ? "#3d2d19" : "#6b4522";
-        ctx.fillRect(e.x - 11, e.y - 8, 22, 6);
-        ctx.strokeStyle = "#ffd166";
-        ctx.strokeRect(e.x - 11.5, e.y - 8.5, 23, 17);
-        ctx.fillStyle = "#ffd166";
-        ctx.fillRect(e.x - 2, e.y - 3, 4, 6);
-        if (!e.opened) {
-          const gl = 0.4 + 0.4 * Math.sin(time * 4 + e.seed);
-          ctx.fillStyle = `rgba(255,209,102,${gl * 0.5})`;
-          ctx.fillRect(e.x - 1, e.y - 12, 2, 4);
+
+        if (e.opened) {
+          // Открытый: тёмный пустой ящик с откинутой крышкой
+          ctx.fillStyle = "#4a361d";
+          ctx.fillRect(e.x - 11, e.y - 4, 22, 14);
+          ctx.fillStyle = "#241a0e";
+          ctx.fillRect(e.x - 8, e.y - 2, 16, 9);
+          // откинутая крышка
+          ctx.fillStyle = "#5a4326";
+          ctx.fillRect(e.x - 11, e.y - 12, 22, 6);
+          ctx.strokeStyle = "#8a6a3e";
+          ctx.strokeRect(e.x - 11.5, e.y - 12.5, 23, 7);
+          ctx.strokeRect(e.x - 11.5, e.y - 4.5, 23, 15);
+        } else {
+          // Закрытый: выпуклая крышка, золотые обручи, свечение
+          const body = e.locked ? "#9a5a24" : "#8a5a2e";
+          ctx.fillStyle = body;
+          ctx.fillRect(e.x - 11, e.y - 3, 22, 13);
+          // крышка-арка
+          ctx.fillStyle = e.locked ? "#b06a2c" : "#a06836";
+          ctx.beginPath();
+          ctx.moveTo(e.x - 11, e.y - 3);
+          ctx.quadraticCurveTo(e.x, e.y - 14, e.x + 11, e.y - 3);
+          ctx.closePath();
+          ctx.fill();
+          // обручи
+          ctx.strokeStyle = "#ffd166";
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(e.x - 6, e.y - 10.5);
+          ctx.lineTo(e.x - 6, e.y + 10);
+          ctx.moveTo(e.x + 6, e.y - 10.5);
+          ctx.lineTo(e.x + 6, e.y + 10);
+          ctx.stroke();
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = "#ffd166";
+          ctx.strokeRect(e.x - 11.5, e.y - 3.5, 23, 14);
+
+          if (e.locked) {
+            // заметный замок
+            ctx.fillStyle = "#c9d4e4";
+            ctx.fillRect(e.x - 4, e.y - 1, 8, 8);
+            ctx.strokeStyle = "#c9d4e4";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(e.x, e.y - 1, 4, Math.PI, 0);
+            ctx.stroke();
+            ctx.lineWidth = 1;
+            ctx.fillStyle = "#10151f";
+            ctx.fillRect(e.x - 1, e.y + 2, 2, 3);
+            ctx.fillStyle = `rgba(232,67,79,${gl})`;
+            ctx.fillRect(e.x - 1, e.y - 16, 2, 4);
+          } else {
+            ctx.fillStyle = "#ffd166";
+            ctx.fillRect(e.x - 2, e.y, 4, 6);
+            ctx.fillStyle = `rgba(255,209,102,${gl * 0.6})`;
+            ctx.fillRect(e.x - 1, e.y - 16, 2, 4);
+          }
         }
         break;
       }
@@ -2087,6 +2522,50 @@ export class Engine {
           ctx.fill();
           ctx.fillStyle = "rgba(255,255,255,0.5)";
           ctx.fillRect(e.x - 3, e.y - 4, 2, 3);
+        } else if (e.itemType === "key") {
+          const fl = 0.6 + 0.4 * Math.sin(time * 5 + e.seed);
+          ctx.fillStyle = `rgba(255,209,102,${fl})`;
+          ctx.beginPath();
+          ctx.arc(e.x - 3, e.y - 2 + bob * 0.4, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = `rgba(255,209,102,${fl})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(e.x, e.y - 2 + bob * 0.4);
+          ctx.lineTo(e.x + 7, e.y - 2 + bob * 0.4);
+          ctx.lineTo(e.x + 7, e.y + 2 + bob * 0.4);
+          ctx.stroke();
+          ctx.lineWidth = 1;
+        } else if (e.itemType === "pick") {
+          ctx.strokeStyle = "#c9d4e4";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(e.x - 6, e.y + 4 + bob * 0.4);
+          ctx.lineTo(e.x + 4, e.y - 4 + bob * 0.4);
+          ctx.lineTo(e.x + 7, e.y - 1 + bob * 0.4);
+          ctx.stroke();
+          ctx.lineWidth = 1;
+        } else if (e.itemType === "gear" && e.payload) {
+          const col = e.payload.color;
+          const pul = 0.5 + 0.5 * Math.sin(time * 4 + e.seed);
+          // подложка-свечение по редкости
+          ctx.fillStyle = `rgba(${this.hexGlow(col)},${0.14 + pul * 0.14})`;
+          ctx.beginPath();
+          ctx.arc(e.x, e.y, 11, 0, Math.PI * 2);
+          ctx.fill();
+          // ромб предмета
+          ctx.fillStyle = col;
+          ctx.save();
+          ctx.translate(e.x, e.y + bob * 0.5);
+          ctx.rotate(Math.PI / 4);
+          ctx.fillRect(-5, -5, 10, 10);
+          ctx.restore();
+          ctx.fillStyle = "rgba(255,255,255,0.35)";
+          ctx.save();
+          ctx.translate(e.x, e.y + bob * 0.5);
+          ctx.rotate(Math.PI / 4);
+          ctx.fillRect(-5, -5, 4, 4);
+          ctx.restore();
         }
         break;
       }
