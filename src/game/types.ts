@@ -72,6 +72,7 @@ export type EngineEvent =
 export interface EngineCallbacks {
   onHud: () => void;
   onEvent: (e: EngineEvent) => void;
+  onFatal?: (msg: string) => void;
 }
 
 export interface ClassDef {

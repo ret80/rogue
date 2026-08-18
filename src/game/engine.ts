@@ -204,10 +204,18 @@ export class Engine {
     this.lastT = performance.now();
     const loop = (t: number) => {
       if (this.destroyed) return;
-      const dt = Math.min(0.05, (t - this.lastT) / 1000);
-      this.lastT = t;
-      this.update(dt);
-      this.render(t / 1000);
+      try {
+        const dt = Math.min(0.05, (t - this.lastT) / 1000);
+        this.lastT = t;
+        this.update(dt);
+        this.render(t / 1000);
+      } catch (err) {
+        const msg = err instanceof Error ? `${err.name}: ${err.message}\n${err.stack ?? ""}` : String(err);
+        // eslint-disable-next-line no-console
+        console.error("[RETRO SOULS] fatal in game loop:", msg);
+        this.cb.onFatal?.(msg);
+        return;
+      }
       this.raf = requestAnimationFrame(loop);
     };
     this.raf = requestAnimationFrame(loop);
@@ -1841,7 +1849,7 @@ export class Engine {
     for (const f of this.floaters) {
       const a = Math.max(0, Math.min(1, f.life / f.max * 1.4));
       ctx.globalAlpha = a;
-      ctx.font = f.big ? '10px "Press Start 2P"' : '8px "Press Start 2P"';
+      ctx.font = f.big ? '700 15px "Pixelify Sans", "Press Start 2P", monospace' : '700 12px "Pixelify Sans", "Press Start 2P", monospace';
       ctx.textAlign = "center";
       ctx.fillStyle = "#000";
       ctx.fillText(f.text, f.x + 1.5, f.y + 1.5);
@@ -2073,7 +2081,7 @@ export class Engine {
     ctx.beginPath();
     ctx.arc(e.x, e.y - 22 + bob + Math.sin(time * 5) * 1.5, 3, 0, Math.PI * 2);
     ctx.fill();
-    ctx.font = '7px "Press Start 2P"';
+    ctx.font = '700 11px "Pixelify Sans", "Press Start 2P", monospace';
     ctx.textAlign = "center";
     ctx.fillStyle = "#ffd166";
     ctx.fillText("ТОРГОВЕЦ", e.x, e.y - 28);

@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  --font-pixel: "Press Start 2P", monospace;
+  --font-pixel: "Pixelify Sans", "Press Start 2P", monospace;
   --font-body: "Rubik", sans-serif;
 
   --color-abyss: #0a0d13;
