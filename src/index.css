@@ -1,1 +1,195 @@
 @import "tailwindcss";
+
+@theme {
+  --font-pixel: "Russo One", "Rubik", sans-serif;
+  --font-body: "Rubik", sans-serif;
+
+  --color-abyss: #0a0d13;
+  --color-pit: #0e1219;
+  --color-stone-900: #131822;
+  --color-stone-800: #1a2130;
+  --color-stone-700: #232c3d;
+  --color-stone-600: #2e3a4f;
+  --color-bone: #e9e2cf;
+  --color-bone-dim: #9aa3b2;
+  --color-ember: #ff9d3d;
+  --color-ember-hot: #ff6b2e;
+  --color-soul: #46f0c8;
+  --color-soul-deep: #14b894;
+  --color-blood: #e8434f;
+  --color-gold: #ffd166;
+  --color-arcane: #b98cff;
+}
+
+html,
+body {
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--color-bone);
+  background: var(--color-abyss);
+  overflow: hidden;
+}
+
+canvas {
+  display: block;
+}
+
+/* ── читаемость: минимальный кегль для всех мелких надписей ── */
+[class*="text-[8px]"] { font-size: 11px; line-height: 1.25; }
+[class*="text-[9px]"] { font-size: 11px; line-height: 1.25; }
+[class*="text-[10px]"] { font-size: 12px; line-height: 1.25; }
+[class*="text-[11px]"] { font-size: 12px; line-height: 1.3; }
+
+/* ── themed panel with notched corners ─────────────────────── */
+.rs-panel {
+  background:
+    linear-gradient(160deg, rgba(46, 58, 79, 0.35), rgba(14, 18, 25, 0.92) 55%),
+    #10151f;
+  border: 1px solid #2e3a4f;
+  box-shadow:
+    0 0 0 1px #06080d,
+    0 14px 40px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(233, 226, 207, 0.06);
+  clip-path: polygon(
+    12px 0, calc(100% - 12px) 0, 100% 12px,
+    100% calc(100% - 12px), calc(100% - 12px) 100%,
+    12px 100%, 0 calc(100% - 12px), 0 12px
+  );
+}
+
+.rs-chip {
+  clip-path: polygon(
+    7px 0, calc(100% - 7px) 0, 100% 7px,
+    100% calc(100% - 7px), calc(100% - 7px) 100%,
+    7px 100%, 0 calc(100% - 7px), 0 7px
+  );
+}
+
+/* ── pixel button ──────────────────────────────────────────── */
+.rs-btn {
+  font-family: var(--font-pixel);
+  letter-spacing: 0.04em;
+  border: 1px solid #000;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.45),
+    0 4px 0 #05070b,
+    0 8px 18px rgba(0, 0, 0, 0.5);
+  transition: transform 0.08s ease, box-shadow 0.08s ease, filter 0.12s ease;
+  cursor: pointer;
+  user-select: none;
+}
+.rs-btn:hover { filter: brightness(1.15); }
+.rs-btn:active {
+  transform: translateY(3px);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.4),
+    0 1px 0 #05070b,
+    0 3px 8px rgba(0, 0, 0, 0.5);
+}
+.rs-btn:disabled {
+  filter: grayscale(0.8) brightness(0.55);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.rs-btn-ember { background: linear-gradient(180deg, #ffb257, #ff6b2e 60%, #d94f1c); color: #2b0f04; }
+.rs-btn-soul  { background: linear-gradient(180deg, #7df5d8, #1fd3a7 60%, #0e9674); color: #04211a; }
+.rs-btn-dark  { background: linear-gradient(180deg, #39465c, #232c3d 60%, #161d2a); color: #cfd6e2; }
+.rs-btn-blood { background: linear-gradient(180deg, #ff7d86, #e8434f 60%, #b02430); color: #2b0508; }
+
+/* ── bars ──────────────────────────────────────────────────── */
+.rs-bar {
+  position: relative;
+  background: #0b0f16;
+  border: 1px solid #000;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+.rs-bar > i {
+  display: block;
+  height: 100%;
+  transition: width 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  background-size: 14px 14px;
+}
+.rs-bar-hp > i {
+  background-image: linear-gradient(180deg, #ff8a75, #e8434f 55%, #a31f2b),
+    repeating-linear-gradient(90deg, rgba(0,0,0,0.22) 0 6px, transparent 6px 12px);
+  background-blend-mode: multiply;
+}
+.rs-bar-xp > i {
+  background-image: linear-gradient(180deg, #8ff7dd, #2fd9b0 55%, #0e9674),
+    repeating-linear-gradient(90deg, rgba(0,0,0,0.18) 0 6px, transparent 6px 12px);
+}
+.rs-bar-boss > i {
+  background-image: linear-gradient(180deg, #d7a0ff, #a55cff 55%, #6d2bc4),
+    repeating-linear-gradient(90deg, rgba(0,0,0,0.2) 0 8px, transparent 8px 16px);
+}
+
+/* ── title flame flicker ───────────────────────────────────── */
+@keyframes rs-flicker {
+  0%, 100% { text-shadow: 0 0 18px rgba(255, 157, 61, 0.55), 0 0 46px rgba(255, 107, 46, 0.3), 0 4px 0 #000; }
+  42% { text-shadow: 0 0 26px rgba(255, 157, 61, 0.8), 0 0 64px rgba(255, 107, 46, 0.45), 0 4px 0 #000; }
+  47% { text-shadow: 0 0 12px rgba(255, 157, 61, 0.4), 0 0 30px rgba(255, 107, 46, 0.2), 0 4px 0 #000; }
+  52% { text-shadow: 0 0 24px rgba(255, 157, 61, 0.75), 0 0 58px rgba(255, 107, 46, 0.4), 0 4px 0 #000; }
+}
+.rs-title { animation: rs-flicker 3.4s infinite; }
+
+@keyframes rs-soulpulse {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(70, 240, 200, 0.7)); transform: translateY(0); }
+  50% { filter: drop-shadow(0 0 16px rgba(70, 240, 200, 1)); transform: translateY(-3px); }
+}
+.rs-soulglow { animation: rs-soulpulse 2.2s ease-in-out infinite; }
+
+@keyframes rs-rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rs-rise { animation: rs-rise 0.4s cubic-bezier(0.2, 0.8, 0.3, 1) both; }
+
+@keyframes rs-pop {
+  0% { opacity: 0; transform: scale(0.85); }
+  70% { transform: scale(1.03); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.rs-pop { animation: rs-pop 0.28s cubic-bezier(0.2, 0.8, 0.3, 1.2) both; }
+
+@keyframes rs-toast {
+  0% { opacity: 0; transform: translateY(-14px) scale(0.95); }
+  10%, 85% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-8px); }
+}
+.rs-toast { animation: rs-toast 2.6s ease both; }
+
+@keyframes rs-shake-x {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+}
+.rs-shake { animation: rs-shake-x 0.18s linear 2; }
+
+.rs-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.rs-scroll::-webkit-scrollbar-track { background: #0b0f16; }
+.rs-scroll::-webkit-scrollbar-thumb { background: #2e3a4f; border: 2px solid #0b0f16; }
+
+.rs-statpip {
+  width: 10px; height: 10px;
+  background: #1a2130;
+  border: 1px solid #05070b;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.7);
+  transform: rotate(45deg);
+}
+.rs-statpip.on {
+  background: linear-gradient(180deg, #ffd166, #ff9d3d);
+  box-shadow: 0 0 8px rgba(255, 157, 61, 0.7);
+}
+
+.rs-divider {
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #2e3a4f 20%, #ff9d3d55 50%, #2e3a4f 80%, transparent);
+}
